@@ -1,7 +1,7 @@
 using HarmonyLib;
-using STRINGS;
+using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
+using System.Reflection.Emit;
 
 namespace DeconstructHotkey;
 
@@ -10,37 +10,24 @@ public class Patches
     [HarmonyPatch(typeof(Deconstructable), "OnRefreshUserMenu")]
     public class Deconstructable_OnRefreshUserMenu_Patch
     {
-        public static bool Prefix(object data, Deconstructable __instance)
+        private static Action CustomAction { get; } = Action.BuildingUtility2;
+
+        [HarmonyTranspiler]
+        public static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> oldBody)
         {
-            OnRefreshUserMenu(__instance, data);
-            return false;
-        }
+            var newBody = oldBody.ToList();
 
-        private delegate void OnDeconstructDelegate(Deconstructable @this);
+            // in the calls to KIconButtonMenu.ButtonInfo.ctor replace the default shortcutKey param value with the custom one
+            var buttonInfoShortcuts = newBody.Where(i => i.opcode == OpCodes.Ldc_I4 && i.operand is int value && value == (int)Action.NumActions);
 
-        private static OnDeconstructDelegate OnDeconstruct { get; } = BuildOnDeconstruct();
+            foreach (var instruction in buttonInfoShortcuts)
+            {
+                instruction.operand = (int)CustomAction;
+            }
 
-        private static OnDeconstructDelegate BuildOnDeconstruct() => (OnDeconstructDelegate)typeof(Deconstructable)
-            .GetMethods(BindingFlags.NonPublic | BindingFlags.Instance)
-            .First(m => m.Name == "OnDeconstruct" && m.GetParameters().Length == 0)
-            .CreateDelegate(typeof(OnDeconstructDelegate));
+            Debug.Log($"DeconstructHotkey: shortcut replaced to {CustomAction}");
 
-        private static void OnRefreshUserMenu(Deconstructable @this, object data)
-        {
-            if (!@this.allowDeconstruction)
-                return;
-
-            var buttonInfo = @this.chore == null
-                ? new KIconButtonMenu.ButtonInfo("action_deconstruct", (string)UI.USERMENUACTIONS.DECONSTRUCT.NAME,
-                    on_click: () => OnDeconstruct(@this),
-                    shortcutKey: Action.BuildingUtility2,
-                    tooltipText: (string)UI.USERMENUACTIONS.DECONSTRUCT.TOOLTIP)
-                : new KIconButtonMenu.ButtonInfo("action_deconstruct", (string)UI.USERMENUACTIONS.DECONSTRUCT.NAME_OFF,
-                    on_click: () => OnDeconstruct(@this),
-                    shortcutKey: Action.BuildingUtility2,
-                    tooltipText: (string)UI.USERMENUACTIONS.DECONSTRUCT.TOOLTIP_OFF);
-
-            Game.Instance.userMenu.AddButton(@this.gameObject, buttonInfo, 0.0f);
+            return newBody;
         }
     }
 }
